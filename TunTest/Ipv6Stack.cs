@@ -54,9 +54,13 @@ public class Ipv6Stack : IPacketProcessor
 
     private void HandleIcmpv6EchoRequest(Ipv6HeaderView requestIpv6, Icmpv6HeaderView icmpRequest)
     {
-        // Nur Echo Requests (ping)
-        if (icmpRequest.Type != 128) return;
-
+        // Nur auf Pings antworten, die exakt an unsere IP gerichtet sind
+        if (!requestIpv6.DestinationAddressBytes.SequenceEqual(_myIpBytes))
+        {
+            // Paket ignorieren, da es nicht für uns bestimmt ist
+            return;
+        }
+        
         // Speicher für Antwort reservieren
         // 40 Byte IPv6-Header + Nutzdaten
         var totalLength = 40 + requestIpv6.PayloadLength;
