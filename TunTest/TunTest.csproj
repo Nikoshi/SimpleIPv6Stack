@@ -14,4 +14,8 @@
         <OptimizationPreference>Speed</OptimizationPreference>
     </PropertyGroup>
 
+    <ItemGroup>
+      <Folder Include="Tests\" />
+    </ItemGroup>
+
 </Project>
