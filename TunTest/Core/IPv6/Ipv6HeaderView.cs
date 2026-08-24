@@ -1,6 +1,6 @@
 using System.Buffers.Binary;
 
-namespace TunTest;
+namespace TunTest.Core.IPv6;
 
 public readonly ref struct Ipv6HeaderView
 {

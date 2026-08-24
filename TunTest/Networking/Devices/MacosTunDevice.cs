@@ -1,7 +1,8 @@
 using System.Runtime.InteropServices;
 using System.Text;
+using TunTest.Networking.Packets;
 
-namespace TunTest;
+namespace TunTest.Networking.Devices;
 
 public class MacosTunDevice : ITunDevice, IPacketSender
 {

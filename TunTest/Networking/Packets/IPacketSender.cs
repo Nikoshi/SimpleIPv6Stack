@@ -1,4 +1,4 @@
-namespace TunTest;
+namespace TunTest.Networking.Packets;
 
 public interface IPacketSender
 {

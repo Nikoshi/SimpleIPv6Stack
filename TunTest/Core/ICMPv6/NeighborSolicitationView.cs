@@ -1,4 +1,4 @@
-namespace TunTest;
+namespace TunTest.Core.ICMPv6;
 
 public readonly ref struct NeighborSolicitationView
 {

@@ -1,0 +1,36 @@
+= Erste Schritte eines IPv6 Stacks
+
+[.lead]
+Fürs Erste wird nur macOS arm64 unterstützt.
+
+== Bauen und ausführen
+
+[source,sh]
+----
+dotnet publish -c Release -r osx-arm64 --self-contained
+sudo ./bin/Release/net9.0/osx-arm64/publish/TunTest
+----
+
+== IP-Adresse zuweisen
+
+Aktuell bekommt die Schnittstelle im Stack die `fd00::2/64`, der Client kann daher erstmal die `fd00::1/64` haben. Das ist fürs Erste erstmal _fix_ :)
+
+[source,sh]
+----
+sudo ifconfig utun10 inet6 fd00::1/64 up
+----
+
+== Ping testen
+
+Die Schnittstelle kann mittels `ping6 -c 1 fd00::2` angepingt werden und antwortet entsprechend:
+
+----
+PING6(56=40+8+8 bytes) fd00::1 --> fd00::2
+16 bytes from fd00::2, icmp_seq=0 hlim=64 time=0.202 ms
+16 bytes from fd00::2, icmp_seq=1 hlim=64 time=0.265 ms
+16 bytes from fd00::2, icmp_seq=2 hlim=64 time=0.294 ms
+
+--- fd00::2 ping6 statistics ---
+3 packets transmitted, 3 packets received, 0.0% packet loss
+round-trip min/avg/max/std-dev = 0.202/0.254/0.294/0.038 ms
+----

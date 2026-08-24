@@ -1,7 +1,9 @@
 using System.Buffers.Binary;
 using System.Net;
+using TunTest.Core.ICMPv6;
+using TunTest.Networking.Packets;
 
-namespace TunTest;
+namespace TunTest.Core.IPv6;
 
 public class Ipv6Stack : IPacketProcessor
 {

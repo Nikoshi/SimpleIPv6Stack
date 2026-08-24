@@ -1,4 +1,4 @@
-namespace TunTest;
+namespace TunTest.Networking.Devices;
 
 public interface ITunDevice : IDisposable
 {
