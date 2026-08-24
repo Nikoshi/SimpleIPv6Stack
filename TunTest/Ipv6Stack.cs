@@ -29,7 +29,11 @@ public class Ipv6Stack : IPacketProcessor
                 HandleIcmpv6(ipv6Header);
                 break;
             default:
-                // Protokoll verwerfen, da nicht unterstützt
+                // Protokoll wird (noch) nicht unterstützt
+                Console.WriteLine($"[Stack] Unbekanntes Protokoll {ipv6Header.NextHeader}. Sende ICMPv6 Unreachable...");
+                
+                // Type 1 (Unreachable), Code 4 (Port/Protocol Unreachable)
+                SendIcmpv6Error(ipv6Header, type: 1, code: 4);
                 break;
         }
     }
@@ -42,6 +46,9 @@ public class Ipv6Stack : IPacketProcessor
         {
             case 128: // Echo Request (Ping)
                 HandleIcmpv6EchoRequest(requestIpv6, icmpHeader);
+                break;
+            case 133: // Router Solicitation
+                // HandleRouterSolicitation(requestIpv6, icmpHeader);
                 break;
             case 135: // Neighbor Solicitation
                 HandleNeighborSolicitation(requestIpv6, icmpHeader);
@@ -151,6 +158,71 @@ public class Ipv6Stack : IPacketProcessor
         ChecksumCalculator.Accumulate(ipv6ReplySpan.Slice(24,16), ref checksum);
         
         checksum += 24; // Länge NA Paket
+        checksum += 58; // Next-Header ICMPv6
+        
+        ChecksumCalculator.Accumulate(icmpReplySpan, ref checksum);
+        
+        // Checksumme eintragen und senden
+        var finalizedChecksum = ChecksumCalculator.Finalize(checksum);
+        BinaryPrimitives.WriteUInt16BigEndian(icmpReplySpan.Slice(2, 2), finalizedChecksum);
+
+        // Absenden!
+        _packetSender.SendPacket(replyBuffer);
+    }
+
+    private void SendIcmpv6Error(Ipv6HeaderView offendingPacket, byte type, byte code)
+    {
+        // Längen berechnen (Die eiserne MTU-Regel)
+        // das Gesamtpaket darf 1280 Bytes nicht überschreiten. 
+        // Overhead: 40 Bytes (IPv6 Header) + 8 Bytes (ICMPv6 Error Header) = 48 Bytes
+        const ushort maxOriginalLength = 1280 - 48;
+        
+        var originalLength = Math.Min(offendingPacket.RawData.Length, maxOriginalLength);
+        
+        // Berechne die Payload-Länge für den neuen IPv6-Header (8 Bytes ICMP + originalLength)
+        var payloadLength = (ushort)(8 + originalLength);
+        
+        // Berechne die totalLength für dein stackalloc (40 Bytes IPv6 + payloadLength)
+        var totalLength = 40 + payloadLength;
+        
+        // Speicher allokieren (Zero Allocation!)
+        Span<byte> replyBuffer = stackalloc byte[totalLength];
+        
+        // IPv6-Header klonen und anpassen
+        var ipv6ReplySpan = replyBuffer[..40];
+        offendingPacket.RawData[..40].CopyTo(ipv6ReplySpan);
+        
+        ipv6ReplySpan[6] =  58; // Unsere Antwort ist ein ICMPv6 Paket (genauer ein Fehler)
+        
+        // Eigene IP als NEUE Source (Offset 8) eintragen
+        _myIpBytes.CopyTo(ipv6ReplySpan.Slice(8, 16));
+        
+        // Alte Source des offendingPacket als NEUE Destination (Offset 24) eintragen
+        offendingPacket.SourceAddressBytes.CopyTo(ipv6ReplySpan.Slice(24, 16));
+        
+        // payloadLength als 16-Bit Big-Endian an Offset 4 eintragen
+        BinaryPrimitives.WriteUInt16BigEndian(ipv6ReplySpan.Slice(4, 2), payloadLength);
+        
+        // ICMPv6-Header (8 Bytes) bauen
+        var icmpReplySpan = replyBuffer[40..];
+        
+        // Super wichtig: Das setzt die Checksumme (Offset 2-3) und 
+        // die 4 "Unused" Bytes (Offset 4-7) brav auf 0x00!
+        icmpReplySpan.Clear();
+
+        icmpReplySpan[0] = type;
+        icmpReplySpan[1] = code;
+        
+        // Den Beweis anhängen!
+        offendingPacket.RawData[..originalLength].CopyTo(icmpReplySpan.Slice(8, originalLength));
+        
+        // 6. Checksumme berechnen
+        uint checksum = 0;
+        
+        ChecksumCalculator.Accumulate(ipv6ReplySpan.Slice(8, 16),ref checksum);
+        ChecksumCalculator.Accumulate(ipv6ReplySpan.Slice(24,16), ref checksum);
+        
+        checksum += payloadLength; // Länge Payload
         checksum += 58; // Next-Header ICMPv6
         
         ChecksumCalculator.Accumulate(icmpReplySpan, ref checksum);
