@@ -172,6 +172,10 @@ public class Ipv6Stack : IPacketProcessor
 
     private void SendIcmpv6Error(Ipv6HeaderView offendingPacket, byte type, byte code)
     {
+        // RFC 4443: Niemals auf Multicast-Pakete mit ICMP-Fehlern antworten!
+        if (offendingPacket.DestinationAddressBytes[0] == 0xFF)
+            return; // Stumm verwerfen
+        
         // Längen berechnen (Die eiserne MTU-Regel)
         // das Gesamtpaket darf 1280 Bytes nicht überschreiten. 
         // Overhead: 40 Bytes (IPv6 Header) + 8 Bytes (ICMPv6 Error Header) = 48 Bytes
