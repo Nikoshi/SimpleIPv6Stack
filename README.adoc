@@ -1,0 +1,5 @@
+= SimpleIPv6Stack
+
+Die eigentliche Implementierung liegt mittlerweile unter `TunTest/`, der ursprüngliche Ansatz unter `NetworkStack` wurde verworfen, vermutlich wechselt der Code irgendwann den Ordner, wenn ich Bock hab ;)
+
+link:TunTest/README.adoc[Projekt README]
