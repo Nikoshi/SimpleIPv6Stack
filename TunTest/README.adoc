@@ -1,7 +1,24 @@
 = Erste Schritte eines IPv6 Stacks
 
 [.lead]
+Ein kleiner, experimenteller IPv6-Stack zum Lernen und Ausprobieren.
 Fürs Erste wird nur macOS arm64 unterstützt.
+
+== Aktueller Stand
+
+Der Stack kann aktuell unter anderem:
+
+* IPv6-Pakete empfangen und senden
+* ICMPv6 Echo Requests beantworten (Ping)
+* ICMPv6 Destination Unreachable erzeugen
+* ICMPv6 Time Exceeded erzeugen
+* ICMPv6 Packet Too Big erzeugen
+* ICMPv6 No Route to Host erzeugen
+* UDP-Pakete empfangen und beantworten
+* UDP-Echo als einfachen Test verwenden
+
+Einige der ICMPv6-Fehlerfälle sind aktuell noch bewusst vereinfacht
+implementiert und dienen hauptsächlich zum Testen des Stacks.
 
 == Bauen und ausführen
 
@@ -13,7 +30,9 @@ sudo ./bin/Release/net9.0/osx-arm64/publish/TunTest
 
 == IP-Adresse zuweisen
 
-Aktuell bekommt die Schnittstelle im Stack die `fd00::2/64`, der Client kann daher erstmal die `fd00::1/64` haben. Das ist fürs Erste erstmal _fix_ :)
+Aktuell bekommt die Schnittstelle im Stack die `fd00::2/64`.
+Der Client kann daher die `fd00::1/64` haben.
+Das ist fürs Erste fest vorgegeben.
 
 [source,sh]
 ----
@@ -22,7 +41,14 @@ sudo ifconfig utun10 inet6 fd00::1/64 up
 
 == Ping testen
 
-Die Schnittstelle kann mittels `ping6 -c 1 fd00::2` angepingt werden und antwortet entsprechend:
+Die Schnittstelle kann mittels `ping6` angepingt werden:
+
+[source,sh]
+----
+ping6 -c 3 fd00::2
+----
+
+Beispiel:
 
 ----
 PING6(56=40+8+8 bytes) fd00::1 --> fd00::2
@@ -34,3 +60,42 @@ PING6(56=40+8+8 bytes) fd00::1 --> fd00::2
 3 packets transmitted, 3 packets received, 0.0% packet loss
 round-trip min/avg/max/std-dev = 0.202/0.254/0.294/0.038 ms
 ----
+
+== UDP testen
+
+Der Stack unterstützt aktuell einen einfachen UDP-Echo-Modus.
+Dabei wird jedes empfangene UDP-Paket unabhängig vom Zielport mit
+dem gleichen Payload zurückgesendet.
+
+[source,sh]
+----
+nc -u -6 fd00::2 9999
+----
+
+Anschließend kann beispielsweise Text eingegeben werden:
+
+----
+Papagei
+Papagei
+----
+
+Die zweite Zeile stammt dabei vom UDP-Echo des eigenen Stacks.
+
+== Traceroute testen
+
+Da der Stack ICMPv6 Time Exceeded unterstützt, kann auch `traceroute6`
+zum Testen verwendet werden:
+
+[source,sh]
+----
+traceroute6 fd00::2
+----
+
+== Hinweise
+
+Der Stack befindet sich noch in einer frühen Entwicklungsphase.
+Viele Funktionen sind zunächst bewusst minimal implementiert.
+
+Aktuell wird ausschließlich IPv6 über ein TUN-Interface verwendet.
+Layer-2-Funktionen wie Ethernet, NDP und Router Discovery sind noch
+nicht Bestandteil der Implementierung.

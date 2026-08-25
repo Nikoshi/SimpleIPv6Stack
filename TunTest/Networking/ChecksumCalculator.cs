@@ -1,6 +1,6 @@
 using System.Buffers.Binary;
 
-namespace TunTest.Core.ICMPv6;
+namespace TunTest.Networking;
 
 public static class ChecksumCalculator
 {

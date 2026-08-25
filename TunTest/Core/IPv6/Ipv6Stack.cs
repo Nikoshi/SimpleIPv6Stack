@@ -1,6 +1,8 @@
 using System.Buffers.Binary;
 using System.Net;
 using TunTest.Core.ICMPv6;
+using TunTest.Core.UDP;
+using TunTest.Networking;
 using TunTest.Networking.Packets;
 
 namespace TunTest.Core.IPv6;
@@ -57,6 +59,9 @@ public class Ipv6Stack : IPacketProcessor
         
         switch (ipv6Header.NextHeader)
         {
+            case 17: // UDP
+                HandleUdp(ipv6Header);
+                break;
             case 58: // ICMPv6
                 HandleIcmpv6(ipv6Header);
                 break;
@@ -70,6 +75,58 @@ public class Ipv6Stack : IPacketProcessor
         }
     }
 
+    private void HandleUdp(Ipv6HeaderView requestIpv6)
+    {
+        var udpHeader = new UdpHeaderView(requestIpv6.Payload);
+        
+        // Berechne Gesamtlänge: 40 (IPv6) + 8 (UDP) + UdpPayloadLength
+        var totalLength = 40 + 8 +  udpHeader.Payload.Length;
+        Span<byte> replyBuffer = stackalloc byte[totalLength];
+        
+        // IPv6-Header klonen und IPs tauschen
+        var ipv6ReplySpan = replyBuffer[..40];
+        requestIpv6.RawData[..40].CopyTo(ipv6ReplySpan);
+        
+        requestIpv6.DestinationAddressBytes.CopyTo(ipv6ReplySpan.Slice(8, 16));
+        requestIpv6.SourceAddressBytes.CopyTo(ipv6ReplySpan.Slice(24, 16));
+        ipv6ReplySpan[6] = 0x11; // NextHeader = UDP (17, 0x11)
+        
+        // UDP-Header kopieren & anpassen
+        var udpReplySpan = replyBuffer.Slice(40, 8);
+        
+        BinaryPrimitives.WriteUInt16BigEndian(udpReplySpan[..2], udpHeader.DestinationPort);
+        BinaryPrimitives.WriteUInt16BigEndian(udpReplySpan.Slice(2,2), udpHeader.SourcePort);
+
+        var newUdpLength = (ushort)(8 + udpHeader.Payload.Length);
+        BinaryPrimitives.WriteUInt16BigEndian(udpReplySpan.Slice(4, 2), newUdpLength);
+
+        // Checksumme zwingend nullen (Offset 6-7)
+        udpReplySpan[6] = 0x00;
+        udpReplySpan[7] = 0x00;
+        
+        // --- Payload kopieren (ab Offset 48) ---
+        var payloadReplySpan = replyBuffer[48..];
+        udpHeader.Payload.CopyTo(payloadReplySpan);
+        
+        // Checksum anpassen
+        uint checksum = 0;
+        
+        // Pseudo-Header
+        ChecksumCalculator.Accumulate(ipv6ReplySpan.Slice(8, 16),ref checksum);
+        ChecksumCalculator.Accumulate(ipv6ReplySpan.Slice(24,16), ref checksum);
+        
+        checksum += newUdpLength;
+        checksum += 17; // Next-Header UDP
+        
+        ChecksumCalculator.Accumulate(replyBuffer[40..], ref checksum);
+        
+        // Checksumme eintragen und senden
+        var finalizedChecksum = ChecksumCalculator.Finalize(checksum);
+        BinaryPrimitives.WriteUInt16BigEndian(udpReplySpan.Slice(6, 2), finalizedChecksum);
+        
+        _packetSender.SendPacket(replyBuffer);
+    }
+    
     private void HandleIcmpv6(Ipv6HeaderView requestIpv6)
     {
         var icmpHeader = new Icmpv6HeaderView(requestIpv6.Payload);
