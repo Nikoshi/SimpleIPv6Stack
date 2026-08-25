@@ -25,6 +25,25 @@ public class Ipv6Stack : IPacketProcessor
         // Prüfen, ob Paket wirklich IPv6, sonst verwerfen
         if (ipv6Header.Version != 6) return;
 
+        // Prüfen: Ist das Paket für uns?
+        var isForUs = ipv6Header.DestinationAddressBytes.SequenceEqual(_myIpBytes);
+        
+        // Routing für später
+        if (!isForUs)
+        {
+            if (ipv6Header.HopLimit <= 1)
+            {
+                SendIcmpv6Error(ipv6Header, 3, 0);
+                return; // Abgelaufene Pakete verwerfen
+            }
+            
+            // (Später kommt hier die Weiterleitungs-Logik hin, falls HopLimit > 1)
+        }
+
+        // Unabhängig vom Routing verwerfen wir ab hier alle Pakete die nicht für uns sind!
+        if (!isForUs)
+            return;
+        
         switch (ipv6Header.NextHeader)
         {
             case 58: // ICMPv6
