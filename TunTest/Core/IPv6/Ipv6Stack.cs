@@ -24,7 +24,15 @@ public class Ipv6Stack : IPacketProcessor
         var ipv6Header = new Ipv6HeaderView(packetData);
         // Prüfen, ob Paket wirklich IPv6, sonst verwerfen
         if (ipv6Header.Version != 6) return;
-
+        
+        // // Wenn das Paket (inkl. 40 Byte Header) größer ist als unsere Leitung...
+        // if (packetData.Length > fakeMtu)
+        // {
+        //     Console.WriteLine($"[DEBUG IPv6] Paket zu groß: {packetData.Length} Bytes. Erlaubte MTU: {{FakeMtu}}.");
+        //     SendIcmpv6Error(ipv6Header, 2, 0, fakeMtu);
+        //     return; // Paket verwerfen
+        // }
+        
         // Prüfen: Ist das Paket für uns?
         var isForUs = ipv6Header.DestinationAddressBytes.SequenceEqual(_myIpBytes);
         
@@ -191,7 +199,7 @@ public class Ipv6Stack : IPacketProcessor
         _packetSender.SendPacket(replyBuffer);
     }
 
-    private void SendIcmpv6Error(Ipv6HeaderView offendingPacket, byte type, byte code)
+    private void SendIcmpv6Error(Ipv6HeaderView offendingPacket, byte type, byte code, uint? maxMtu = null)
     {
         // RFC 4443: Niemals auf Multicast-Pakete mit ICMP-Fehlern antworten!
         if (offendingPacket.DestinationAddressBytes[0] == 0xFF)
@@ -237,6 +245,10 @@ public class Ipv6Stack : IPacketProcessor
 
         icmpReplySpan[0] = type;
         icmpReplySpan[1] = code;
+        
+        // Wenn eine max MTU übergeben wird, dann ins ICMP Paket schreiben (Offset 4-7)
+        if (maxMtu.HasValue)
+            BinaryPrimitives.WriteUInt32BigEndian(icmpReplySpan.Slice(4, 4), maxMtu.Value);
         
         // Den Beweis anhängen!
         offendingPacket.RawData[..originalLength].CopyTo(icmpReplySpan.Slice(8, originalLength));
