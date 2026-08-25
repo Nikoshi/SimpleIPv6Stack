@@ -45,10 +45,13 @@ public class Ipv6Stack : IPacketProcessor
                 return; // Abgelaufene Pakete verwerfen
             }
             
-            // (Später kommt hier die Weiterleitungs-Logik hin, falls HopLimit > 1)
+            // Sende Destination Unreachable (Type 1), No Route (Code 0)
+            SendIcmpv6Error(ipv6Header, 1, 0);
+            
+            return; // Paket verwerfen
         }
 
-        // Unabhängig vom Routing verwerfen wir ab hier alle Pakete die nicht für uns sind!
+        // Unabhängig vom Routing verwerfen wir ab hier alle Pakete, die nicht für uns sind!
         if (!isForUs)
             return;
         
@@ -77,10 +80,16 @@ public class Ipv6Stack : IPacketProcessor
                 HandleIcmpv6EchoRequest(requestIpv6, icmpHeader);
                 break;
             case 133: // Router Solicitation
-                // HandleRouterSolicitation(requestIpv6, icmpHeader);
+            case 134: // Router Advertisement
+                // TODO: NDP und SLAAC Implementierung.
+                // Aktuell "auf Eis", da macOS TUN keine Layer-2 Multicasts für Neighbor Discovery sendet.
                 break;
             case 135: // Neighbor Solicitation
-                HandleNeighborSolicitation(requestIpv6, icmpHeader);
+                // TODO: HandleNeighborSolicitation(requestIpv6, icmpHeader);
+                break;
+            case 136: // Neighbor Advertisement
+                // TODO: NDP und SLAAC Implementierung.
+                // Aktuell "auf Eis", da macOS TUN keine Layer-2 Multicasts für Neighbor Discovery sendet.
                 break;
             default:
                 // Unbekannter ICMP-Typ -> verwerfen
