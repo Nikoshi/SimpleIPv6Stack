@@ -15,7 +15,8 @@ Der Stack kann aktuell unter anderem:
 * ICMPv6 Packet Too Big erzeugen
 * ICMPv6 No Route to Host erzeugen
 * UDP-Pakete empfangen und beantworten
-* UDP-Echo als einfachen Test verwenden
+* UDP-Echo als einfachen Test verwenden (Alle Ports außer Port 13)
+* UDP-Daytime auf Port 13 verwenden
 
 Einige der ICMPv6-Fehlerfälle sind aktuell noch bewusst vereinfacht
 implementiert und dienen hauptsächlich zum Testen des Stacks.
