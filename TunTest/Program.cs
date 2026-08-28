@@ -24,10 +24,12 @@ try
     // Wir leihen uns einen Puffer aus dem Pool (GC-Entlastung)
     var rentedArray = ArrayPool<byte>.Shared.Rent(2048);
     var buffer = rentedArray.AsSpan();
-
+    
     try
     {
         var stack = new Ipv6Stack(tun, IPAddress.Parse("fd00::2"));
+        
+ 
         while (true)
         {
             // Blockiert im Kernel, wacht im Mikrosekundenbereich bei Paket-Eingang auf

@@ -1,189 +1,359 @@
+using System.Buffers.Binary;
 using System.Runtime.InteropServices;
 using System.Text;
 using TunTest.Networking.Packets;
 
 namespace TunTest.Networking.Devices;
 
-public class MacosTunDevice : ITunDevice, IPacketSender
+public sealed class MacosTunDevice : ITunDevice, IPacketSender
 {
-    private readonly int _fd;
-    public string Name { get; private set; } = "utun?";
+    private const int PfSystem = 32;
+    private const int SockDgram = 2;
+    private const int SysProtoControl = 2;
 
-    private const int PF_SYSTEM = 32;
-    private const int SOCK_DGRAM = 2;
-    private const int SYSPROTO_CONTROL = 2;
-    private const ulong CTLIOCGINFO = 0xc0644e03;
+    private const int AfInet = 2;
+    private const int AfInet6 = 30;
+
+    private const int UtunOptIfName = 2;
+
+    // _IOC(IOC_INOUT, 'N', 3, 100)
+    private const ulong CtlIoCInfo = 0xc0644e03;
+
+    private const string UtunControlName =
+        "com.apple.net.utun_control";
+
+    private readonly int _fd;
+
+    public string Name { get; }
+
+    /*
+     * macOS:
+     *
+     * struct ctl_info {
+     *     u_int32_t ctl_id;
+     *     char      ctl_name[MAX_KCTL_NAME]; // 96 Bytes
+     * };
+     */
+    [StructLayout(LayoutKind.Sequential)]
+    private unsafe struct CtlInfo
+    {
+        public uint Id;
+
+        public fixed byte Name[96];
+    }
+
+    /*
+     * macOS:
+     *
+     * struct sockaddr_ctl {
+     *     u_char      sc_len;
+     *     u_char      sc_family;
+     *     u_int16_t   ss_sysaddr;
+     *     u_int32_t   sc_id;
+     *     u_int32_t   sc_unit;
+     *     u_int32_t   sc_reserved[5];
+     * };
+     */
+    [StructLayout(LayoutKind.Sequential)]
+    private struct SockAddrCtl
+    {
+        public byte Length;
+        public byte Family;
+        public ushort SysAddr;
+        public uint Id;
+        public uint Unit;
+
+        public uint Reserved0;
+        public uint Reserved1;
+        public uint Reserved2;
+        public uint Reserved3;
+        public uint Reserved4;
+    }
 
     [DllImport("libc", EntryPoint = "socket", SetLastError = true)]
-    private static extern int Socket(int domain, int type, int protocol);
+    private static extern int Socket(
+        int domain,
+        int type,
+        int protocol);
 
-    // DER ARM64-TRICK: Wir füllen x2 bis x7 mit Dummy-IntPtrs.
-    // Unser echter Pointer rutscht dadurch als 9. Argument direkt auf den Stack (SP)!
+    /*
+     * ioctl() ist in libc eine variadische Funktion:
+     *
+     * int ioctl(int fd, unsigned long request, ...);
+     *
+     * Auf Apple Silicon müssen wir den Aufruf deshalb über die
+     * ARM64-kompatible P/Invoke-Signatur abbilden.
+     *
+     * Der eigentliche Pointer auf ctlInfo landet dadurch dort,
+     * wo ihn die native ABI erwartet.
+     */
     [DllImport("libc", EntryPoint = "ioctl", SetLastError = true)]
     private static extern unsafe int Ioctl(
-        int fd, 
-        ulong request, 
-        IntPtr dummy3, 
-        IntPtr dummy4, 
-        IntPtr dummy5, 
-        IntPtr dummy6, 
-        IntPtr dummy7, 
-        IntPtr dummy8, 
+        int fd,
+        ulong request,
+        IntPtr dummy3,
+        IntPtr dummy4,
+        IntPtr dummy5,
+        IntPtr dummy6,
+        IntPtr dummy7,
+        IntPtr dummy8,
         void* arg);
 
     [DllImport("libc", EntryPoint = "connect", SetLastError = true)]
-    private static extern unsafe int Connect(int fd, void* addr, int addrLen);
+    private static extern unsafe int Connect(
+        int fd,
+        void* address,
+        uint addressLength);
 
     [DllImport("libc", EntryPoint = "getsockopt", SetLastError = true)]
-    private static extern unsafe int GetSockOpt(int fd, int level, int optname, void* optval, ref int optLen);
+    private static extern unsafe int GetSockOpt(
+        int fd,
+        int level,
+        int option,
+        void* value,
+        ref uint valueLength);
 
     [DllImport("libc", EntryPoint = "read", SetLastError = true)]
-    private static extern unsafe int ReadRaw(int fd, void* buf, int count);
+    private static extern unsafe nint ReadRaw(
+        int fd,
+        void* buffer,
+        nuint count);
 
     [DllImport("libc", EntryPoint = "write", SetLastError = true)]
-    private static extern unsafe int WriteRaw(int fd, void* buf, int count);
+    private static extern unsafe nint WriteRaw(
+        int fd,
+        void* buffer,
+        nuint count);
 
     [DllImport("libc", EntryPoint = "close", SetLastError = true)]
     private static extern int Close(int fd);
 
-    public unsafe MacosTunDevice(int utunUnit = 0)
+    public unsafe MacosTunDevice(int? utunUnit = null)
     {
-        _fd = Socket(PF_SYSTEM, SOCK_DGRAM, SYSPROTO_CONTROL);
-        if (_fd < 0)
-        {
-            throw new Exception($"Konnte System-Socket nicht öffnen. errno: {Marshal.GetLastPInvokeError()}");
-        }
+        _fd = Socket(
+            PfSystem,
+            SockDgram,
+            SysProtoControl);
 
-        IntPtr ctlInfoAlloc = Marshal.AllocHGlobal(100);
-        IntPtr sockAddrAlloc = Marshal.AllocHGlobal(32);
-        IntPtr nameBufAlloc = Marshal.AllocHGlobal(64);
+        if (_fd < 0)
+            ThrowLastError("socket");
 
         try
         {
-            byte* ctlInfo = (byte*)ctlInfoAlloc.ToPointer();
-            
-            // Speicher sauber nullen
-            for (int i = 0; i < 100; i++)
+            /*
+             * ctl_info vorbereiten.
+             */
+            var ctlInfo = new CtlInfo();
+
+            var nameBytes =
+                Encoding.ASCII.GetBytes(UtunControlName);
+
+            if (nameBytes.Length >= 96)
             {
-                *(ctlInfo + i) = 0;
-            }
-            
-            byte[] nameBytes = Encoding.ASCII.GetBytes("com.apple.net.utun_control");
-            for (int i = 0; i < nameBytes.Length; i++)
-            {
-                *(ctlInfo + 4 + i) = nameBytes[i];
+                throw new InvalidOperationException(
+                    "UTUN_CONTROL_NAME ist zu lang.");
             }
 
-            // Wir übergeben 6x IntPtr.Zero für die Register x2-x7.
-            // 'ctlInfo' landet punktgenau auf dem Stack.
-            if (Ioctl(_fd, CTLIOCGINFO, 
-                      IntPtr.Zero, IntPtr.Zero, IntPtr.Zero, IntPtr.Zero, IntPtr.Zero, IntPtr.Zero, 
-                      ctlInfo) < 0)
+            for (var i = 0; i < nameBytes.Length; i++)
+                ctlInfo.Name[i] = nameBytes[i];
+
+            /*
+             * ioctl(fd, CTLIOCGINFO, &ctlInfo)
+             *
+             * Wichtig:
+             * Auf ARM64 verwenden wir hier bewusst die spezielle
+             * P/Invoke-Signatur für die variadische ioctl-Funktion.
+             */
+            if (Ioctl(
+                    _fd,
+                    CtlIoCInfo,
+                    IntPtr.Zero,
+                    IntPtr.Zero,
+                    IntPtr.Zero,
+                    IntPtr.Zero,
+                    IntPtr.Zero,
+                    IntPtr.Zero,
+                    &ctlInfo) < 0)
             {
-                throw new Exception($"ioctl(CTLIOCGINFO) fehlgeschlagen. errno: {Marshal.GetLastPInvokeError()}");
+                ThrowLastError("ioctl(CTLIOCGINFO)");
             }
 
-            uint ctlId = *(uint*)ctlInfo;
+            /*
+             * sockaddr_ctl aufbauen.
+             *
+             * sc_unit:
+             *
+             *   0       -> automatisch
+             *   n + 1   -> utun<n>
+             */
+            var address = new SockAddrCtl
+            {
+                Length = (byte)sizeof(SockAddrCtl),
+                Family = PfSystem,
+                SysAddr = SysProtoControl,
+                Id = ctlInfo.Id,
+                Unit = utunUnit.HasValue
+                    ? checked((uint)(utunUnit.Value + 1))
+                    : 0u,
 
-            byte* sockAddr = (byte*)sockAddrAlloc.ToPointer();
-            for (int i = 0; i < 32; i++)
-            {
-                *(sockAddr + i) = 0;
-            }
-            
-            *sockAddr = 32;                               // sc_len
-            *(sockAddr + 1) = PF_SYSTEM;                  // sc_family
-            *(ushort*)(sockAddr + 2) = SYSPROTO_CONTROL;  // ss_sysaddr
-            *(uint*)(sockAddr + 4) = ctlId;               // sc_id
-            *(uint*)(sockAddr + 8) = (uint)utunUnit;      // sc_unit (0 = Auto)
+                Reserved0 = 0,
+                Reserved1 = 0,
+                Reserved2 = 0,
+                Reserved3 = 0,
+                Reserved4 = 0
+            };
 
-            if (Connect(_fd, sockAddr, 32) < 0)
+            if (Connect(
+                    _fd,
+                    &address,
+                    (uint)sizeof(SockAddrCtl)) < 0)
             {
-                throw new Exception($"connect() zu utun fehlgeschlagen. errno: {Marshal.GetLastPInvokeError()}");
+                ThrowLastError("connect");
             }
 
-            byte* nameBuf = (byte*)nameBufAlloc.ToPointer();
-            int optLen = 64;
-            for (int i = 0; i < 64; i++)
-            {
-                *(nameBuf + i) = 0;
-            }
-
-            if (GetSockOpt(_fd, SYSPROTO_CONTROL, 2, nameBuf, ref optLen) == 0)
-            {
-                Name = Marshal.PtrToStringAnsi((IntPtr)nameBuf) ?? "utun?";
-            }
-            else
-            {
-                Name = $"utun{(utunUnit == 0 ? "x" : (utunUnit - 1).ToString())}";
-            }
+            /*
+             * Jetzt existiert das utun Interface.
+             */
+            Name = GetInterfaceName();
         }
         catch
         {
             Close(_fd);
             throw;
         }
-        finally
+    }
+
+    private unsafe string GetInterfaceName()
+    {
+        Span<byte> buffer = stackalloc byte[64];
+
+        fixed (byte* p = buffer)
         {
-            Marshal.FreeHGlobal(ctlInfoAlloc);
-            Marshal.FreeHGlobal(sockAddrAlloc);
-            Marshal.FreeHGlobal(nameBufAlloc);
+            uint length = (uint)buffer.Length;
+
+            if (GetSockOpt(
+                    _fd,
+                    SysProtoControl,
+                    UtunOptIfName,
+                    p,
+                    ref length) < 0)
+            {
+                ThrowLastError(
+                    "getsockopt(UTUN_OPT_IFNAME)");
+            }
         }
+
+        var zeroIndex = buffer.IndexOf((byte)0);
+
+        if (zeroIndex >= 0)
+            buffer = buffer[..zeroIndex];
+
+        return Encoding.ASCII.GetString(buffer);
     }
 
     public unsafe int Read(Span<byte> buffer)
     {
-        if (buffer.Length == 0) return 0;
+        if (buffer.IsEmpty)
+            return 0;
 
         fixed (byte* p = buffer)
         {
-            int result = ReadRaw(_fd, p, buffer.Length);
-            
-            if (result > 4)
-            {
-                buffer.Slice(4, result - 4).CopyTo(buffer);
-                return result - 4;
-            }
-            return 0;
+            var result = ReadRaw(
+                _fd,
+                p,
+                (nuint)buffer.Length);
+
+            if (result < 0)
+                ThrowLastError("read");
+
+            if (result <= 4)
+                return 0;
+
+            /*
+             * macOS utun liefert:
+             *
+             *   4 Byte Address Family
+             *   IPv4/IPv6 Paket
+             *
+             * Unser Stack soll nur das eigentliche IP-Paket sehen.
+             */
+            var packetLength = (int)result - 4;
+
+            buffer[4..(int)result]
+                .CopyTo(buffer);
+
+            return packetLength;
         }
     }
 
     public unsafe void Write(ReadOnlySpan<byte> packet)
     {
-        if (packet.Length == 0) return;
+        if (packet.IsEmpty)
+            return;
 
-        // Absolut klammerfreier Hochleistungszugriff auf das erste Byte
-        ref readonly byte firstByte = ref MemoryMarshal.GetReference(packet);
-        byte ipVersion = (byte)(firstByte >> 4);
+        var version = packet[0] >> 4;
 
-        byte[] piBuffer = new byte[packet.Length + 4];
-        Span<byte> piSpan = piBuffer.AsSpan();
-        
-        ref byte piTarget = ref MemoryMarshal.GetReference(piSpan.Slice(3, 1));
-        if (ipVersion == 6)
+        var addressFamily = version switch
         {
-            piTarget = 0x1e; // AF_INET6
-        }
-        else if (ipVersion == 4)
+            4 => AfInet,
+            6 => AfInet6,
+
+            _ => throw new ArgumentException(
+                $"Unbekannte IP-Version: {version}",
+                nameof(packet))
+        };
+
+        /*
+         * utun erwartet vor dem eigentlichen Paket:
+         *
+         *   4 Byte AF_*
+         *   IPv4/IPv6 Paket
+         *
+         * Der AF-Wert ist Host-Endian.
+         * Apple Silicon ist Little Endian.
+         */
+        Span<byte> buffer =
+            stackalloc byte[4 + packet.Length];
+
+        BinaryPrimitives.WriteInt32LittleEndian(
+            buffer[..4],
+            addressFamily);
+
+        packet.CopyTo(buffer[4..]);
+
+        fixed (byte* p = buffer)
         {
-            piTarget = 0x02; // AF_INET
+            var result = WriteRaw(
+                _fd,
+                p,
+                (nuint)buffer.Length);
+
+            if (result < 0)
+                ThrowLastError("write");
+
+            if (result != buffer.Length)
+            {
+                throw new IOException(
+                    $"utun write war unvollständig: " +
+                    $"{result}/{buffer.Length} Bytes.");
+            }
         }
-
-        packet.CopyTo(piSpan.Slice(4));
-
-        fixed (byte* p = piBuffer)
-        {
-            WriteRaw(_fd, p, piBuffer.Length);
-        }
-    }
-
-    public void Dispose()
-    {
-        if (_fd >= 0) Close(_fd);
     }
 
     public void SendPacket(ReadOnlySpan<byte> packet)
+        => Write(packet);
+
+    public void Dispose()
     {
-        Write(packet);
+        if (_fd >= 0)
+            Close(_fd);
+    }
+
+    private static void ThrowLastError(string operation)
+    {
+        var errno = Marshal.GetLastPInvokeError();
+
+        throw new IOException(
+            $"{operation} fehlgeschlagen. errno={errno}");
     }
 }
