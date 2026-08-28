@@ -14,7 +14,7 @@ public readonly ref struct Ipv6HeaderView
         _data = data;
     }
     
-    private uint VersionTrafficClassFlow => BinaryPrimitives.ReadUInt32BigEndian(_data[0..4]);
+    private uint VersionTrafficClassFlow => BinaryPrimitives.ReadUInt32BigEndian(_data[..4]);
     
     // Version: Die obersten 4 Bits.
     public int Version => (int)(VersionTrafficClassFlow >> 28);
