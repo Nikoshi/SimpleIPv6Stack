@@ -256,12 +256,12 @@ public sealed class MacosTunDevice : ITunDevice, IPacketSender
         if (buffer.IsEmpty)
             return 0;
 
-        fixed (byte* p = buffer)
+        // Wir lassen 4 Bytes Platz für den utun-Header, den der Kernel voranstellt
+        Span<byte> rawBuffer = stackalloc byte[4 + buffer.Length];
+
+        fixed (byte* p = rawBuffer)
         {
-            var result = ReadRaw(
-                _fd,
-                p,
-                (nuint)buffer.Length);
+            var result = ReadRaw(_fd, p, (nuint)rawBuffer.Length);
 
             if (result < 0)
                 ThrowLastError("read");
@@ -269,18 +269,10 @@ public sealed class MacosTunDevice : ITunDevice, IPacketSender
             if (result <= 4)
                 return 0;
 
-            /*
-             * macOS utun liefert:
-             *
-             *   4 Byte Address Family
-             *   IPv4/IPv6 Paket
-             *
-             * Unser Stack soll nur das eigentliche IP-Paket sehen.
-             */
             var packetLength = (int)result - 4;
 
-            buffer[4..(int)result]
-                .CopyTo(buffer);
+            // Direkt ohne Selbst-Kopie in den Zielpuffer des Callers schreiben
+            rawBuffer[4..(4 + packetLength)].CopyTo(buffer);
 
             return packetLength;
         }
@@ -315,7 +307,7 @@ public sealed class MacosTunDevice : ITunDevice, IPacketSender
         Span<byte> buffer =
             stackalloc byte[4 + packet.Length];
 
-        BinaryPrimitives.WriteInt32LittleEndian(
+        BinaryPrimitives.WriteInt32BigEndian(
             buffer[..4],
             addressFamily);
 

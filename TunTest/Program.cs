@@ -1,5 +1,5 @@
 ﻿using System.Buffers;
-using System.Buffers.Binary;
+using System.Diagnostics;
 using System.Net;
 using System.Runtime.InteropServices;
 using TunTest.Core.IPv6;
@@ -37,7 +37,10 @@ try
             if (bytesRead <= 0) continue;
 
             var ipPacket = buffer[..bytesRead];
+            var sw = Stopwatch.StartNew();
             stack.ProcessPacket(ipPacket);
+            var totalNanoseconds = sw.Elapsed.TotalNanoseconds;
+            Console.WriteLine($"nanoSeconds: {totalNanoseconds}");
         }
     }
     finally

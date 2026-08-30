@@ -4,6 +4,8 @@ Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "NetworkStack", "NetworkStac
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "TunTest", "TunTest\TunTest.csproj", "{E67A0C5C-A754-4121-B01F-F316F965269C}"
 EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "ThroughputClient", "ThroughputClient\ThroughputClient.csproj", "{93996B31-9E8B-4911-AE4A-4C5296F0E8BA}"
+EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|Any CPU = Debug|Any CPU
@@ -18,5 +20,9 @@ Global
 		{E67A0C5C-A754-4121-B01F-F316F965269C}.Debug|Any CPU.Build.0 = Debug|Any CPU
 		{E67A0C5C-A754-4121-B01F-F316F965269C}.Release|Any CPU.ActiveCfg = Release|Any CPU
 		{E67A0C5C-A754-4121-B01F-F316F965269C}.Release|Any CPU.Build.0 = Release|Any CPU
+		{93996B31-9E8B-4911-AE4A-4C5296F0E8BA}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{93996B31-9E8B-4911-AE4A-4C5296F0E8BA}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{93996B31-9E8B-4911-AE4A-4C5296F0E8BA}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{93996B31-9E8B-4911-AE4A-4C5296F0E8BA}.Release|Any CPU.Build.0 = Release|Any CPU
 	EndGlobalSection
 EndGlobal
